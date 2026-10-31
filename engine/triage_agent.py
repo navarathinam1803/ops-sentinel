@@ -3,8 +3,11 @@ Module B core: turns raw error/lineage context into a plain-language business
 impact narrative and a suggested fix, via whichever LLM provider is configured.
 """
 import json
+import logging
 
 from engine.config import settings
+
+logger = logging.getLogger("ops_sentinel.triage")
 
 SYSTEM_PROMPT = """You are Ops Sentinel's triage agent for a data platform.
 You will be given a pipeline failure's error stack and its downstream data
@@ -27,12 +30,58 @@ Rules:
 
 def _build_user_prompt(error_context: dict, lineage: list[dict]) -> str:
     return json.dumps(
-        {"pipeline_failure": error_context, "downstream_lineage": lineage},
+        {"incident_context": error_context, "downstream_lineage": lineage},
         default=str,
     )
 
 
+def llm_configured() -> bool:
+    if settings.llm_provider == "anthropic":
+        return bool(settings.anthropic_api_key)
+    return bool(settings.openai_api_key)
+
+
+def demo_triage_result(error_context: dict, lineage: list[dict]) -> dict:
+    """Deterministic triage when no LLM key is set — same shape as a real response."""
+    if error_context.get("QUERY_ID") or error_context.get("ESTIMATED_COST_USD"):
+        return {
+            "business_impact": (
+                "A repeated or unoptimized query is driving compute cost above threshold, "
+                "inflating the platform bill without adding business value."
+            ),
+            "root_cause": (
+                "Query metrics show elevated estimated cost"
+                + (
+                    f" (${error_context.get('ESTIMATED_COST_USD')})"
+                    if error_context.get("ESTIMATED_COST_USD")
+                    else ""
+                )
+                + " on a hot table; likely duplicate or missing filter."
+            ),
+            "suggested_fix_sql": None,
+            "risk_level": "HIGH",
+        }
+    dashboard = "downstream dashboards"
+    if lineage:
+        dashboard = lineage[0].get("DOWNSTREAM_DASHBOARD") or lineage[0].get("downstream_dashboard") or dashboard
+    return {
+        "business_impact": (
+            f"The {dashboard} may show stale figures because an upstream pipeline step failed."
+        ),
+        "root_cause": (
+            error_context.get("ERROR_STACK")
+            or "Pipeline failure recorded in PIPELINE_LOGS; see error stack for transform details."
+        )[:500],
+        "suggested_fix_sql": "UPDATE sales_clean SET region_code = 'UNKNOWN' WHERE region_code IS NULL",
+        "risk_level": "MEDIUM",
+    }
+
+
 def triage(error_context: dict, lineage: list[dict]) -> dict:
+    if not llm_configured():
+        logger.info("LLM skipped — no API key for provider %s", settings.llm_provider)
+        return demo_triage_result(error_context, lineage)
+
     user_prompt = _build_user_prompt(error_context, lineage)
 
     if settings.llm_provider == "anthropic":

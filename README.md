@@ -2,7 +2,7 @@
 
 > The Autonomous, Cost-Aware Platform Command Center — ExaThon India 2026
 
-Ops Sentinel closes the loop between **data reliability** (pipeline failures) and
+Licensed under [MIT](LICENSE). Ops Sentinel closes the loop between **data reliability** (pipeline failures) and
 **cloud cost waste** (runaway/duplicate queries) using Exasol Personal as the
 metadata/analytics layer, MCP as the read-only investigation path, an LLM as the
 triage agent, and Slack as the human-approval gate before anything is ever
@@ -119,6 +119,37 @@ validation function rejecting each one before showing the approved fix
 actually being applied.
 
 ## Setup (weekend build order)
+
+### macOS / Linux (quick path)
+
+```bash
+# Module A
+curl https://www.exasol.com/install/starter-kit.sh | sh
+exakit mcp-setup   # optional: wire Cursor/Claude to Exasol MCP
+exapump sql -p starter-kit -f db/schema.sql
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r engine/requirements.txt
+cp .env.example .env   # fill EXASOL_* from `exakit info`
+python scripts/seed_data.py
+
+# Module B
+export PYTHONPATH="$PWD"
+uvicorn engine.main:app --reload --port 8000
+
+# Module C (second terminal)
+pip install -r dashboard/requirements.txt
+streamlit run dashboard/app.py
+
+# Demo inject (third terminal)
+python scripts/inject_demo_incident.py
+```
+
+Slack interactivity during the demo: `ngrok http 8000` → set the Slack app's
+**Interactivity Request URL** to `https://<ngrok-host>/slack/interactions`.
+
+Without Slack or an LLM key, the engine still completes triage (demo JSON) and
+logs the Block Kit card; approve locally with
+`curl -X POST http://localhost:8000/api/incidents/<id>/approve`.
 
 ### Day 1 morning — Module A (whoever is comfortable with SQL)
 1. Install the Exasol Personal Local Starter Kit (one command — ask your AI

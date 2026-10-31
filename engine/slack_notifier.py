@@ -1,17 +1,36 @@
 """Builds and sends the Slack Block Kit Approve/Reject card (Module C, chat half)."""
+import json
+import logging
+
 from slack_sdk import WebClient
 
 from engine.config import settings
 
-client = WebClient(token=settings.slack_bot_token)
+logger = logging.getLogger("ops_sentinel.slack")
+
+_client: WebClient | None = None
 
 
-def post_incident_card(incident_id: int, source_type: str, business_impact: str,
-                        root_cause: str, suggested_fix_sql: str | None,
-                        risk_level: str) -> str:
-    """Posts the triage result as an interactive card. Returns the Slack message ts
-    so it can be stored on the INCIDENTS row and later updated in place."""
-    blocks = [
+def slack_configured() -> bool:
+    return bool(settings.slack_bot_token and settings.slack_channel_id)
+
+
+def _get_client() -> WebClient:
+    global _client  # noqa: PLW0603 — lazy singleton for WebClient
+    if _client is None:
+        _client = WebClient(token=settings.slack_bot_token)
+    return _client
+
+
+def _build_blocks(
+    incident_id: int,
+    source_type: str,
+    business_impact: str,
+    root_cause: str,
+    suggested_fix_sql: str | None,
+    risk_level: str,
+) -> list[dict]:
+    return [
         {
             "type": "header",
             "text": {"type": "plain_text", "text": f"🚨 Incident #{incident_id} — {source_type}"},
@@ -55,7 +74,25 @@ def post_incident_card(incident_id: int, source_type: str, business_impact: str,
             ],
         },
     ]
-    response = client.chat_postMessage(
+
+
+def post_incident_card(incident_id: int, source_type: str, business_impact: str,
+                        root_cause: str, suggested_fix_sql: str | None,
+                        risk_level: str) -> str | None:
+    """Posts the triage result as an interactive card. Returns Slack message ts, or None if Slack is not configured."""
+    blocks = _build_blocks(
+        incident_id, source_type, business_impact, root_cause, suggested_fix_sql, risk_level
+    )
+    if not slack_configured():
+        logger.info(
+            "Slack skipped — SLACK_BOT_TOKEN or SLACK_CHANNEL_ID unset; "
+            "use POST /api/incidents/%s/approve for local demo. Card payload: %s",
+            incident_id,
+            json.dumps(blocks, indent=2),
+        )
+        return None
+
+    response = _get_client().chat_postMessage(
         channel=settings.slack_channel_id,
         blocks=blocks,
         text=f"Incident #{incident_id} needs your approval",
@@ -65,7 +102,10 @@ def post_incident_card(incident_id: int, source_type: str, business_impact: str,
 
 def update_incident_card(message_ts: str, outcome_text: str) -> None:
     """Replaces the action buttons with a plain outcome line once resolved."""
-    client.chat_update(
+    if not slack_configured() or not message_ts:
+        logger.info("Slack update skipped: %s", outcome_text)
+        return
+    _get_client().chat_update(
         channel=settings.slack_channel_id,
         ts=message_ts,
         text=outcome_text,

@@ -26,7 +26,7 @@ from slack_sdk.signature import SignatureVerifier
 from engine.config import settings
 from engine.remediation import execute_remediation, reject_incident
 from engine.scoring import compute_efficiency_score, compute_trust_score, recent_incidents
-from engine.slack_notifier import update_incident_card
+from engine.slack_notifier import slack_configured, update_incident_card
 from engine.watcher import watch_loop
 
 logging.basicConfig(level=logging.INFO)
@@ -69,6 +69,31 @@ async def efficiency_score():
 @app.get("/api/incidents")
 async def incidents():
     return {"incidents": await asyncio.to_thread(recent_incidents)}
+
+
+@app.post("/api/incidents/{incident_id}/approve")
+async def approve_incident_local(incident_id: int):
+    """Local demo only — use Slack when configured."""
+    if slack_configured():
+        raise HTTPException(
+            status_code=403,
+            detail="Slack is configured; approve incidents via the Slack card",
+        )
+    success, detail = await asyncio.to_thread(execute_remediation, incident_id, "local-demo")
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+    return {"ok": True, "detail": detail}
+
+
+@app.post("/api/incidents/{incident_id}/reject")
+async def reject_incident_local(incident_id: int):
+    if slack_configured():
+        raise HTTPException(
+            status_code=403,
+            detail="Slack is configured; reject incidents via the Slack card",
+        )
+    await asyncio.to_thread(reject_incident, incident_id)
+    return {"ok": True}
 
 
 @app.post("/slack/interactions")

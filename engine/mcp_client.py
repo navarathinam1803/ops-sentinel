@@ -74,6 +74,17 @@ async def get_error_context(pipeline_id: str, log_id: int) -> dict:
     return rows[0] if rows else {}
 
 
+async def get_query_metrics_context(query_id: int) -> dict:
+    """Pull cost-spike query row for LLM triage (step 2-3, cost track)."""
+    sql = (
+        "SELECT QUERY_ID, USER_ID, TABLE_NAME, QUERY_TEXT, EXECUTED_TS, "
+        "COMPUTE_TIME_MS, CPU_SECONDS, ROWS_SCANNED, ESTIMATED_COST_USD, IS_DUPLICATE "
+        f"FROM SENTINEL.QUERY_METRICS WHERE QUERY_ID = {int(query_id)}"
+    )
+    rows = await run_readonly_sql(sql)
+    return rows[0] if rows else {}
+
+
 async def get_lineage_for_table(table_name: str) -> list[dict]:
     """Trace downstream impact so the LLM can describe business impact."""
     sql = (

@@ -51,9 +51,13 @@ def compute_efficiency_score() -> float:
 def recent_incidents(limit: int = 20) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT INCIDENT_ID, SOURCE_TYPE, STATUS, BUSINESS_IMPACT, RISK_LEVEL, CREATED_TS "
+            "SELECT INCIDENT_ID, SOURCE_TYPE, STATUS, BUSINESS_IMPACT, ROOT_CAUSE, "
+            "SUGGESTED_FIX_SQL, RISK_LEVEL, CREATED_TS "
             "FROM INCIDENTS ORDER BY CREATED_TS DESC LIMIT {limit!d}",
             {"limit": limit},
         ).fetchall()
-    cols = ["incident_id", "source_type", "status", "business_impact", "risk_level", "created_ts"]
+    cols = [
+        "incident_id", "source_type", "status", "business_impact", "root_cause",
+        "suggested_fix_sql", "risk_level", "created_ts",
+    ]
     return [dict(zip(cols, r)) for r in rows]

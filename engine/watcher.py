@@ -25,7 +25,7 @@ from datetime import datetime
 
 from engine.config import settings
 from engine.db import get_connection
-from engine.mcp_client import get_error_context, get_lineage_for_table
+from engine.mcp_client import get_error_context, get_lineage_for_table, get_query_metrics_context
 from engine.slack_notifier import post_incident_card
 from engine.triage_agent import triage
 
@@ -91,6 +91,8 @@ async def _handle_incident(source_type: str, source_ref_id: int,
     error_context = {}
     if source_type == "PIPELINE_FAILURE":
         error_context = await get_error_context(pipeline_id, source_ref_id)  # already async: real MCP I/O
+    elif source_type == "COST_SPIKE":
+        error_context = await get_query_metrics_context(source_ref_id)
     lineage = await get_lineage_for_table(table_name) if table_name else []
 
     triage_result = await asyncio.to_thread(triage, error_context, lineage)
@@ -105,7 +107,8 @@ async def _handle_incident(source_type: str, source_ref_id: int,
         suggested_fix_sql=triage_result.get("suggested_fix_sql"),
         risk_level=triage_result.get("risk_level", "HIGH"),
     )
-    await asyncio.to_thread(_store_slack_ts, incident_id, message_ts)
+    if message_ts:
+        await asyncio.to_thread(_store_slack_ts, incident_id, message_ts)
 
 
 def _create_incident_row(source_type: str, source_ref_id: int) -> int:

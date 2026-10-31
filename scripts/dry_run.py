@@ -138,23 +138,15 @@ def step_3_investigate(conn: sqlite3.Connection, row: sqlite3.Row) -> tuple[dict
 
 def step_4_triage(error_context: dict, lineage: list[dict]) -> dict:
     banner("STEP 4", "Triage: LLM generates business impact + a suggested fix")
-    has_llm_key = bool(settings.openai_api_key or settings.anthropic_api_key)
-    if has_llm_key:
+    from engine.triage_agent import llm_configured, triage
+
+    if llm_configured():
         print("  LLM key found in .env -> calling the REAL engine.triage_agent.triage()")
-        from engine.triage_agent import triage
-        result = triage(error_context, lineage)
-        print("  (the above was a real LLM API call)")
     else:
-        print("  No LLM key in .env -> using a canned response so the flow still completes")
-        result = {
-            "business_impact": (
-                "The Finance Executive BI dashboard is showing stale sales figures "
-                "because the upstream sales_clean transform is failing."
-            ),
-            "root_cause": "The transform expects a 'region_code' column missing from the latest sales_raw extract.",
-            "suggested_fix_sql": "UPDATE sales_clean SET region_code = 'UNKNOWN' WHERE region_code IS NULL",
-            "risk_level": "MEDIUM",
-        }
+        print("  No LLM key in .env -> triage() returns deterministic demo JSON")
+    result = triage(error_context, lineage)
+    if llm_configured():
+        print("  (the above was a real LLM API call)")
     for key, value in result.items():
         print(f"    {key}: {value}")
     return result
@@ -162,20 +154,21 @@ def step_4_triage(error_context: dict, lineage: list[dict]) -> dict:
 
 def step_5a_notify(incident_id: int, triage_result: dict) -> None:
     banner("STEP 5 (part 1)", "Post the interactive Approve / Reject card")
-    has_slack = bool(settings.slack_bot_token and settings.slack_channel_id)
-    if has_slack:
+    from engine.slack_notifier import post_incident_card, slack_configured
+
+    if slack_configured():
         print("  Slack credentials found in .env -> posting a REAL card")
-        from engine.slack_notifier import post_incident_card
-        post_incident_card(
-            incident_id=incident_id,
-            source_type="PIPELINE_FAILURE",
-            business_impact=triage_result["business_impact"],
-            root_cause=triage_result["root_cause"],
-            suggested_fix_sql=triage_result["suggested_fix_sql"],
-            risk_level=triage_result["risk_level"],
-        )
     else:
-        print("  No Slack credentials in .env -> rendering the card as text instead of posting it")
+        print("  No Slack credentials in .env -> post_incident_card logs Block Kit JSON")
+    post_incident_card(
+        incident_id=incident_id,
+        source_type="PIPELINE_FAILURE",
+        business_impact=triage_result["business_impact"],
+        root_cause=triage_result["root_cause"],
+        suggested_fix_sql=triage_result["suggested_fix_sql"],
+        risk_level=triage_result["risk_level"],
+    )
+    if not slack_configured():
         print(textwrap.dedent(f"""
             +---------------------------------------------------------------+
             | Incident #{incident_id} -- PIPELINE_FAILURE
